@@ -5,9 +5,9 @@ import swaggerUi from "swagger-ui-express";
 const swaggerDefinition = {
   openapi: '3.0.0', 
   info: {
-    title: 'Book Management System API', 
+    title: 'Test CI/CD', 
     version: '1.0.0', 
-    description: 'A simple Book management system API which follow CRUD operations and RESTful architecture.', 
+    description: 'API documentation for Test CI/CD', 
   },
   servers: [
     {
