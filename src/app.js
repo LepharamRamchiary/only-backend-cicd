@@ -28,8 +28,10 @@ app.use(express.static("public"));
 
 
 // routes import
+import taskRouter from "./routes/task.routes.js";
 
 // routes declaration
+app.use("/api/tasks", taskRouter);
 
 // Swagger
 swaggerSetup(app);
