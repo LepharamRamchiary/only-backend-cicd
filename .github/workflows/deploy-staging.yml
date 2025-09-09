@@ -37,11 +37,14 @@ jobs:
             # Go to app directory
             cd ${{ secrets.EC2_PATH }}
 
+            # 🔑 Write .env from GitHub Secret
+            echo "${{ secrets.ENV_FILE }}" > .env
+
             # Install dependencies
             npm install --production
 
             # Restart app with PM2 (create if first time)
-            pm2 restart src/index.js || pm2 start src/index.js
+            pm2 restart src/index.js || pm2 start src/index.js --name staging-app
 
             # Ensure PM2 restarts on reboot
             pm2 save
