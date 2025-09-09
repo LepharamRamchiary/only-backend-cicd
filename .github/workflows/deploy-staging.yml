@@ -12,7 +12,7 @@ jobs:
 
     steps:
       - name: Checkout the files
-        uses: actions/checkout@v4
+        uses: actions/checkout@v2
 
       - name: Deploy project files to EC2
         uses: easingthemes/ssh-deploy@main
@@ -29,59 +29,20 @@ jobs:
           username: ${{ secrets.EC2_USER }}
           key: ${{ secrets.EC2_SSH_KEY }}
           script: |
-            # Update system packages
+            # Ensure Node & PM2
             sudo apt-get update -y
-            
-            # Install Node.js (using NodeSource repository for latest version)
-            curl -fsSL https://deb.nodesource.com/setup_18.x | sudo -E bash -
-            sudo apt-get install -y nodejs git
-            
-            # Remove any existing PM2 installation to avoid conflicts
-            sudo npm uninstall -g pm2 || true
-            
-            # Install PM2 globally
-            sudo npm install -g pm2@latest
-            
+            sudo apt-get install -y nodejs npm git
+            sudo npm install -g pm2
+
             # Go to app directory
             cd ${{ secrets.EC2_PATH }}
-            
-            # Stop existing PM2 processes
-            pm2 stop staging-app || true
-            pm2 delete staging-app || true
-            
-            # Write .env from GitHub Secret
-            echo "${{ secrets.ENV_FILE }}" > .env
-            
-            # Verify .env file was created and contains MongoDB URI
-            echo "=== Checking .env file ==="
-            if [ -f .env ]; then
-              echo "✅ .env file exists"
-              if grep -q "MONGODB_URI=" .env; then
-                echo "✅ MONGODB_URI found in .env"
-                # Show first part of MongoDB URI to verify format (hide credentials)
-                grep "MONGODB_URI=" .env | sed 's/MONGODB_URI=mongodb[^@]*@/MONGODB_URI=mongodb:\/\/***:***@/'
-              else
-                echo "❌ MONGODB_URI not found in .env file"
-                echo "Current .env contents:"
-                cat .env
-                exit 1
-              fi
-            else
-              echo "❌ .env file was not created"
-              exit 1
-            fi
-            
-            # Clean install dependencies
-            rm -rf node_modules package-lock.json || true
-            
+
             # Install dependencies
             npm install --production
-            
-            # Start app with PM2
-            pm2 start src/index.js --name staging-app
-            
-            # Save PM2 configuration
+
+            # Restart app with PM2 (create if first time)
+            pm2 restart src/index.js || pm2 start src/index.js
+
+            # Ensure PM2 restarts on reboot
             pm2 save
-            
-            # Setup PM2 to start on boot (only run once)
-            pm2 startup systemd -u ${{ secrets.EC2_USER }} --hp /home/${{ secrets.EC2_USER }} || true
+            pm2 startup || true
