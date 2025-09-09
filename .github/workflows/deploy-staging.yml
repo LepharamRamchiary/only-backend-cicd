@@ -56,12 +56,12 @@ jobs:
             echo "=== Checking .env file ==="
             if [ -f .env ]; then
               echo "✅ .env file exists"
-              if grep -q "MONGODB_URL=" .env; then
-                echo "✅ MONGODB_URL found in .env"
+              if grep -q "MONGODB_URI=" .env; then
+                echo "✅ MONGODB_URI found in .env"
                 # Show first part of MongoDB URI to verify format (hide credentials)
-                grep "MONGODB_URL=" .env | sed 's/MONGODB_URL=mongodb[^@]*@/MONGODB_URL=mongodb:\/\/***:***@/'
+                grep "MONGODB_URI=" .env | sed 's/MONGODB_URI=mongodb[^@]*@/MONGODB_URI=mongodb:\/\/***:***@/'
               else
-                echo "❌ MONGODB_URL not found in .env file"
+                echo "❌ MONGODB_URI not found in .env file"
                 echo "Current .env contents:"
                 cat .env
                 exit 1
