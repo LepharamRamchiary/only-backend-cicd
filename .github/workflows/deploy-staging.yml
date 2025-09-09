@@ -52,12 +52,30 @@ jobs:
             # Write .env from GitHub Secret
             echo "${{ secrets.ENV_FILE }}" > .env
             
-            # Verify .env file was created correctly
-            echo "=== .env file contents (first few lines, sensitive data hidden) ==="
-            head -3 .env | sed 's/=.*/=***HIDDEN***/'
+            # Verify .env file was created and contains MongoDB URI
+            echo "=== Checking .env file ==="
+            if [ -f .env ]; then
+              echo "✅ .env file exists"
+              if grep -q "MONGODB_URL=" .env; then
+                echo "✅ MONGODB_URL found in .env"
+                # Show first part of MongoDB URI to verify format (hide credentials)
+                grep "MONGODB_URL=" .env | sed 's/MONGODB_URL=mongodb[^@]*@/MONGODB_URL=mongodb:\/\/***:***@/'
+              else
+                echo "❌ MONGODB_URL not found in .env file"
+                echo "Current .env contents:"
+                cat .env
+                exit 1
+              fi
+            else
+              echo "❌ .env file was not created"
+              exit 1
+            fi
+            
+            # Clean install dependencies
+            rm -rf node_modules package-lock.json || true
             
             # Install dependencies
-            npm install 
+            npm install --production
             
             # Start app with PM2
             pm2 start src/index.js --name staging-app
