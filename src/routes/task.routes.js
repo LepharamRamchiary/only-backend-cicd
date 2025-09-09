@@ -29,7 +29,7 @@ const router = Router();
  * /api/tasks:
  *   post:
  *     summary: Create a new task
- *     tags: [Tasks]
+ *     tags: [api/tasks]
  *     requestBody:
  *       required: true
  *       content:
