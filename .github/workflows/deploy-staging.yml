@@ -41,7 +41,7 @@ jobs:
             npm install --production
 
             # Restart app with PM2 (create if first time)
-            pm2 restart staging-app || pm2 start server.js --name staging-app
+            pm2 restart staging-app || pm2 start src/index.js --name staging-app
 
             # Ensure PM2 restarts on reboot
             pm2 save
