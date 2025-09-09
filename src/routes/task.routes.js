@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { createTask } from "../controllers/task.controllers.js";
+import { createTask, getAllTask } from "../controllers/task.controllers.js";
 
 const router = Router();
 
@@ -56,7 +56,35 @@ const router = Router();
  *         description: Bad request (validation error)
  */
 
+/**
+ * @swagger
+ * /api/tasks/get:
+ *   get:
+ *     summary: Get all tasks
+ *     tags: [api/tasks]
+ *     responses:
+ *       200:
+ *         description: List of all tasks
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 status:
+ *                   type: number
+ *                   example: 200
+ *                 data:
+ *                   type: array
+ *                   items:
+ *                     $ref: '#/components/schemas/Task'
+ *                 message:
+ *                   type: string
+ *                   example: "Tasks retrieved successfully"
+ *       404:
+ *         description: No tasks found
+ */
 
 router.post("/", createTask);
+router.get("/get", getAllTask);
 
 export default router;
