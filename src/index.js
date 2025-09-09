@@ -10,7 +10,7 @@ dotenv.config({
 
 connectDB()
   .then(() => {
-    app.listen(process.env.PORT || 4000, () => {
+    app.listen(process.env.PORT, "0.0.0.0", () => {
       console.log(`Server is running at port: ${process.env.PORT}`);
       console.log(`Swagger docs available at http://localhost:${process.env.PORT}/api-docs`);
     });
