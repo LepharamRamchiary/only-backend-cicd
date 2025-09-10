@@ -103,7 +103,7 @@ jobs:
                 add_header X-Content-Type-Options "nosniff" always;
                 
                 location / {
-                    proxy_pass http://localhost:8000;
+                    proxy_pass http://ec2-13-60-188-21.eu-north-1.compute.amazonaws.com;
                     proxy_http_version 1.1;
                     proxy_set_header Upgrade \$http_upgrade;
                     proxy_set_header Connection 'upgrade';
