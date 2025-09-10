@@ -32,7 +32,7 @@ jobs:
             set -e  # Exit on any error
             
             # Define variables
-            APP_NAME="nodeapp"
+            APP_NAME="producation"
             APP_PATH="${{ secrets.EC2_PATH_P }}"
             
             echo "🚀 Starting deployment..."
@@ -116,7 +116,16 @@ jobs:
             WantedBy=multi-user.target
             EOF
             
-            # Reload systemd and start service
+            # Debug: Check what the service file looks like
+            echo "📋 Checking service file content..."
+            sudo cat /etc/systemd/system/$APP_NAME.service
+            
+            # Debug: Check if paths exist
+            echo "📂 Checking paths..."
+            echo "APP_PATH exists: $([ -d "$APP_PATH" ] && echo "YES" || echo "NO")"
+            echo "index.js exists: $([ -f "$APP_PATH/src/index.js" ] && echo "YES" || echo "NO")"
+            ls -la "$APP_PATH/" || echo "Cannot list APP_PATH"
+            ls -la "$APP_PATH/src/" || echo "Cannot list APP_PATH/src"
             echo "🔄 Starting Node.js service..."
             sudo systemctl daemon-reload
             sudo systemctl enable $APP_NAME
@@ -130,7 +139,7 @@ jobs:
                 echo "✅ Node.js service started successfully"
                 sudo systemctl status $APP_NAME --no-pager -l
             else
-                echo " Node.js service failed to start"
+                echo "❌ Node.js service failed to start"
                 sudo systemctl status $APP_NAME --no-pager -l
                 sudo journalctl -u $APP_NAME --no-pager -n 20
                 exit 1
