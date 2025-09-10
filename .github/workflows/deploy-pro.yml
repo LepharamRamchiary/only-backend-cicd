@@ -57,14 +57,14 @@ jobs:
             
             [Service]
             Type=simple
-            ExecStart=/usr/bin/node ${{ secrets.EC2_PATH_P }}/src/index.js
+            ExecStart=/usr/bin/node /home/ubuntu/${{ secrets.EC2_PATH_P }}/src/index.js
             Restart=always
             RestartSec=5
             User=${{ secrets.EC2_USER_P }}
             Group=${{ secrets.EC2_USER_P }}
             Environment=NODE_ENV=production
             Environment=PORT=8000
-            WorkingDirectory=${{ secrets.EC2_PATH_P }}
+            WorkingDirectory=/home/ubuntu/${{ secrets.EC2_PATH_P }}
             StandardOutput=journal
             StandardError=journal
             
