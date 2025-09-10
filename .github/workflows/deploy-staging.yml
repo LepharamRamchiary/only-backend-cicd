@@ -29,20 +29,54 @@ jobs:
           username: ${{ secrets.EC2_USER }}
           key: ${{ secrets.EC2_SSH_KEY }}
           script: |
-            # Ensure Node & PM2
+            # Install dependencies
             sudo apt-get update -y
-            sudo apt-get install -y nodejs npm git
-            sudo npm install -g pm2
+            sudo apt-get install -y nodejs npm git nginx
 
             # Go to app directory
             cd ${{ secrets.EC2_PATH }}
+            npm install 
 
-            # Install dependencies
-            npm install --production
+            # Create systemd service file for Node app
+            sudo bash -c 'cat > /etc/systemd/system/nodeapp.service <<EOF
+            [Unit]
+            Description=Node.js App
+            After=network.target
 
-            # Restart app with PM2 (create if first time)
-            pm2 restart src/index.js || pm2 start src/index.js
+            [Service]
+            ExecStart=/usr/bin/node ${{ secrets.EC2_PATH }}/src/index.js
+            Restart=always
+            User=${{ secrets.EC2_USER }}
+            Environment=PORT=8000
+            WorkingDirectory=${{ secrets.EC2_PATH }}
 
-            # Ensure PM2 restarts on reboot
-            pm2 save
-            pm2 startup || true
+            [Install]
+            WantedBy=multi-user.target
+            EOF'
+
+            # Reload systemd and start service
+            sudo systemctl daemon-reload
+            sudo systemctl enable nodeapp
+            sudo systemctl restart nodeapp
+
+            # Configure Nginx reverse proxy
+            sudo bash -c 'cat > /etc/nginx/sites-available/nodeapp <<EOF
+            server {
+                listen 80;
+                server_name _;
+
+                location / {
+                    proxy_pass http://localhost:8000;
+                    proxy_http_version 1.1;
+                    proxy_set_header Upgrade \$http_upgrade;
+                    proxy_set_header Connection "upgrade";
+                    proxy_set_header Host \$host;
+                    proxy_cache_bypass \$http_upgrade;
+                }
+            }
+            EOF'
+
+            # Enable site and restart Nginx
+            sudo ln -sf /etc/nginx/sites-available/nodeapp /etc/nginx/sites-enabled/
+            sudo nginx -t
+            sudo systemctl restart nginx
