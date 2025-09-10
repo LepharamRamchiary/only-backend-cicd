@@ -83,8 +83,9 @@ jobs:
             # Check if service is running
             sudo systemctl status nodeapp --no-pager
             
-            # Remove default nginx site
-            sudo rm -f /etc/nginx/sites-enabled/default
+            # Clean up nginx sites
+            sudo rm -rf /etc/nginx/sites-enabled/*
+            sudo rm -f /etc/nginx/sites-available/nodeapp
             
             # Create nginx sites directories if they don't exist
             sudo mkdir -p /etc/nginx/sites-available
