@@ -130,7 +130,7 @@ jobs:
                 echo "✅ Node.js service started successfully"
                 sudo systemctl status $APP_NAME --no-pager -l
             else
-                echo "❌ Node.js service failed to start"
+                echo " Node.js service failed to start"
                 sudo systemctl status $APP_NAME --no-pager -l
                 sudo journalctl -u $APP_NAME --no-pager -n 20
                 exit 1
