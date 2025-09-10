@@ -23,4 +23,12 @@ const getAllTask = asyncHandler(async (req, res) => {
     .json(new ApiResponse(200, tasks, "Fetch all task sucessfully"));
 });
 
-export { createTask, getAllTask };
+const daleteTask = asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  const task = await Task.findByIdAndDelete(id);
+  return res
+    .status(200)
+    .json(new ApiResponse(200, task, "Task deleted successfully"));
+});
+
+export { createTask, getAllTask, daleteTask };
