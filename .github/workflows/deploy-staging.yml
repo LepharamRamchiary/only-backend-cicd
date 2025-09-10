@@ -29,54 +29,115 @@ jobs:
           username: ${{ secrets.EC2_USER }}
           key: ${{ secrets.EC2_SSH_KEY }}
           script: |
-            # Install dependencies
+            # Update package list
             sudo apt-get update -y
-            sudo apt-get install -y nodejs npm git nginx
-
-            # Go to app directory
+            
+            # Install Node.js using NodeSource repository (more reliable)
+            curl -fsSL https://deb.nodesource.com/setup_18.x | sudo -E bash -
+            sudo apt-get install -y nodejs nginx
+            
+            # Verify installations
+            node --version
+            npm --version
+            nginx -v
+            
+            # Go to app directory and install dependencies
             cd ${{ secrets.EC2_PATH }}
-            npm install 
-
+            npm install
+            
+            # Stop existing services if running
+            sudo systemctl stop nodeapp || true
+            sudo systemctl stop nginx || true
+            
             # Create systemd service file for Node app
-            sudo bash -c 'cat > /etc/systemd/system/nodeapp.service <<EOF
+            sudo tee /etc/systemd/system/nodeapp.service > /dev/null <<EOF
             [Unit]
             Description=Node.js App
             After=network.target
-
+            
             [Service]
+            Type=simple
             ExecStart=/usr/bin/node ${{ secrets.EC2_PATH }}/src/index.js
             Restart=always
+            RestartSec=10
             User=${{ secrets.EC2_USER }}
+            Group=${{ secrets.EC2_USER }}
+            Environment=NODE_ENV=production
             Environment=PORT=8000
             WorkingDirectory=${{ secrets.EC2_PATH }}
-
+            StandardOutput=journal
+            StandardError=journal
+            
             [Install]
             WantedBy=multi-user.target
-            EOF'
-
+            EOF
+            
             # Reload systemd and start service
             sudo systemctl daemon-reload
             sudo systemctl enable nodeapp
-            sudo systemctl restart nodeapp
-
+            sudo systemctl start nodeapp
+            
+            # Wait for the service to start
+            sleep 5
+            
+            # Check if service is running
+            sudo systemctl status nodeapp --no-pager
+            
+            # Remove default nginx site
+            sudo rm -f /etc/nginx/sites-enabled/default
+            
+            # Create nginx sites directories if they don't exist
+            sudo mkdir -p /etc/nginx/sites-available
+            sudo mkdir -p /etc/nginx/sites-enabled
+            
             # Configure Nginx reverse proxy
-            sudo bash -c 'cat > /etc/nginx/sites-available/nodeapp <<EOF
+            sudo tee /etc/nginx/sites-available/nodeapp > /dev/null <<EOF
             server {
                 listen 80;
-                server_name _;
-
+                server_name ${{ secrets.EC2_HOST }} _;
+                
+                # Security headers
+                add_header X-Frame-Options "SAMEORIGIN" always;
+                add_header X-XSS-Protection "1; mode=block" always;
+                add_header X-Content-Type-Options "nosniff" always;
+                
                 location / {
                     proxy_pass http://localhost:8000;
                     proxy_http_version 1.1;
                     proxy_set_header Upgrade \$http_upgrade;
-                    proxy_set_header Connection "upgrade";
+                    proxy_set_header Connection 'upgrade';
                     proxy_set_header Host \$host;
+                    proxy_set_header X-Real-IP \$remote_addr;
+                    proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+                    proxy_set_header X-Forwarded-Proto \$scheme;
                     proxy_cache_bypass \$http_upgrade;
+                    proxy_read_timeout 86400;
+                }
+                
+                # Health check endpoint (optional)
+                location /health {
+                    access_log off;
+                    return 200 "healthy\n";
+                    add_header Content-Type text/plain;
                 }
             }
-            EOF'
-
-            # Enable site and restart Nginx
+            EOF
+            
+            # Enable site
             sudo ln -sf /etc/nginx/sites-available/nodeapp /etc/nginx/sites-enabled/
+            
+            # Test nginx configuration
             sudo nginx -t
-            sudo systemctl restart nginx
+            
+            # Start and enable nginx
+            sudo systemctl enable nginx
+            sudo systemctl start nginx
+            
+            # Check nginx status
+            sudo systemctl status nginx --no-pager
+            
+            # Show listening ports
+            sudo netstat -tlnp | grep :80 || sudo ss -tlnp | grep :80
+            
+            echo "Deployment completed successfully!"
+            echo "Your app should now be accessible at: http://${{ secrets.EC2_HOST }}/"
