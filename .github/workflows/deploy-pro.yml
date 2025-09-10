@@ -30,110 +30,138 @@ jobs:
           key: ${{ secrets.EC2_SSH_KEY_P }}
           script: |
             set -e
-            
-            # Define variables
+
             APP_NAME="nodeapp"
             APP_PATH="${{ secrets.EC2_PATH_P }}"
-            
-            echo "Starting deployment..."
-            echo "App Path: $APP_PATH"
-            
+
+            echo "🚀 Starting deployment..."
+            echo "📂 App Path: $APP_PATH"
+
             # Update system
             sudo apt-get update -y
-            
-            # Install Node.js if not present
+
+            # Install Node.js if not already installed
             if ! command -v node >/dev/null 2>&1; then
+                echo "📦 Installing Node.js..."
                 curl -fsSL https://deb.nodesource.com/setup_18.x | sudo -E bash -
                 sudo apt-get install -y nodejs
             fi
-            
-            # Install nginx if not present
+
+            # Install Nginx if not already installed
             if ! command -v nginx >/dev/null 2>&1; then
+                echo "📦 Installing Nginx..."
                 sudo apt-get install -y nginx
             fi
-            
-            # Install dependencies
+
+            # Verify installations
+            node --version
+            npm --version
+            nginx -v
+
+            # Go to app directory and install dependencies
             cd "$APP_PATH"
+            echo "📦 Installing production dependencies..."
             npm install --production
-            
-            # Stop existing services
+
+            # Stop existing Node.js service (if running)
             sudo systemctl stop $APP_NAME || true
-            
-            # Create systemd service
+            sudo systemctl stop nginx || true
+
+            # Create systemd service for Node.js app
+            echo "⚙️ Setting up systemd service..."
             sudo tee /etc/systemd/system/$APP_NAME.service > /dev/null <<EOF
-[Unit]
-Description=Node.js Production App
-After=network.target
+            [Unit]
+            Description=Node.js Production App
+            After=network.target
 
-[Service]
-Type=simple
-ExecStart=/usr/bin/node $APP_PATH/src/index.js
-Restart=always
-RestartSec=5
-User=${{ secrets.EC2_USER_P }}
-Group=${{ secrets.EC2_USER_P }}
-Environment=NODE_ENV=production
-Environment=PORT=8000
-WorkingDirectory=$APP_PATH
-StandardOutput=journal
-StandardError=journal
+            [Service]
+            Type=simple
+            ExecStart=/usr/bin/node $APP_PATH/src/index.js
+            Restart=always
+            RestartSec=5
+            User=${{ secrets.EC2_USER_P }}
+            Group=${{ secrets.EC2_USER_P }}
+            Environment=NODE_ENV=production
+            Environment=PORT=8000
+            WorkingDirectory=$APP_PATH
+            StandardOutput=journal
+            StandardError=journal
 
-[Install]
-WantedBy=multi-user.target
-EOF
-            
-            # Start Node.js service
+            [Install]
+            WantedBy=multi-user.target
+            EOF
+
+            # Reload and start Node.js app
             sudo systemctl daemon-reload
             sudo systemctl enable $APP_NAME
             sudo systemctl start $APP_NAME
-            
-            # Check if service started
+
+            # Wait for the service to start
             sleep 5
+
+            # Verify service
             if systemctl is-active --quiet $APP_NAME; then
-                echo "Node.js service started successfully"
+                echo "✅ Node.js service is running"
+                sudo systemctl status $APP_NAME --no-pager
             else
-                echo "Service failed to start"
+                echo "❌ Node.js service failed to start"
                 sudo systemctl status $APP_NAME --no-pager
                 exit 1
             fi
-            
-            # Configure nginx
+
+            # Configure Nginx reverse proxy
+            echo "⚙️ Configuring Nginx..."
             sudo mkdir -p /etc/nginx/sites-available /etc/nginx/sites-enabled
             sudo rm -f /etc/nginx/sites-enabled/default
-            
-            # Create nginx configuration
+
             sudo tee /etc/nginx/sites-available/$APP_NAME > /dev/null <<EOF
-server {
-    listen 80;
-    server_name _;
-    
-    location / {
-        proxy_pass http://localhost:8000;
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade \$http_upgrade;
-        proxy_set_header Connection 'upgrade';
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto \$scheme;
-        proxy_cache_bypass \$http_upgrade;
-    }
-}
-EOF
-            
-            # Enable nginx site
+            server {
+                listen 80;
+                server_name ${{ secrets.EC2_HOST_P }} _;
+                
+                # Security headers
+                add_header X-Frame-Options "SAMEORIGIN" always;
+                add_header X-XSS-Protection "1; mode=block" always;
+                add_header X-Content-Type-Options "nosniff" always;
+                
+                location / {
+                    proxy_pass http://localhost:8000;
+                    proxy_http_version 1.1;
+                    proxy_set_header Upgrade \$http_upgrade;
+                    proxy_set_header Connection 'upgrade';
+                    proxy_set_header Host \$host;
+                    proxy_set_header X-Real-IP \$remote_addr;
+                    proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+                    proxy_set_header X-Forwarded-Proto \$scheme;
+                    proxy_cache_bypass \$http_upgrade;
+                    proxy_read_timeout 86400;
+                }
+                
+                # Health check endpoint (optional)
+                location /health {
+                    access_log off;
+                    return 200 "healthy\n";
+                    add_header Content-Type text/plain;
+                }
+            }
+            EOF
+
+            # Enable Nginx site
             sudo ln -sf /etc/nginx/sites-available/$APP_NAME /etc/nginx/sites-enabled/
-            
-            # Test and start nginx
+
+            # Test and restart Nginx
             if sudo nginx -t; then
                 sudo systemctl enable nginx
-                sudo systemctl restart nginx
-                echo "Nginx configured and started"
+                sudo systemctl start nginx
+                echo "✅ Nginx configured and running"
+                sudo systemctl status nginx --no-pager
             else
-                echo "Nginx configuration failed"
+                echo "❌ Nginx configuration failed"
                 exit 1
             fi
-            
-            # Final status
-            echo "Deployment completed successfully!"
-            echo "App is running at: http://${{ secrets.EC2_HOST_P }}/"
+
+            # Show listening ports
+            sudo netstat -tlnp | grep :80 || sudo ss -tlnp | grep :80
+
+            echo "🎉 Deployment completed successfully!"
+            echo "🌍 App is live at: http://${{ secrets.EC2_HOST_P }}/"
