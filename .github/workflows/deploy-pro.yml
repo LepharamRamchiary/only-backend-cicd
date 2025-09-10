@@ -1,0 +1,372 @@
+name: Push-to-EC2-Staging
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    name: Deploy Node.js app to EC2 (staging)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout the files
+        uses: actions/checkout@v2
+
+      - name: Deploy project files to EC2
+        uses: easingthemes/ssh-deploy@main
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.EC2_SSH_KEY_P }}
+          REMOTE_HOST: ${{ secrets.EC2_HOST_P }}
+          REMOTE_USER: ${{ secrets.EC2_USER_P }}
+          TARGET: ${{ secrets.EC2_PATH_P}}
+
+      - name: Executing remote ssh commands
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.EC2_HOST_P }}
+          username: ${{ secrets.EC2_USER_P }}
+          key: ${{ secrets.EC2_SSH_KEY_P }}
+          script: |
+            # Update package list
+            sudo apt-get update -y
+            
+            # Install Node.js using NodeSource repository (more reliable)
+            curl -fsSL https://deb.nodesource.com/setup_18.x | sudo -E bash -
+            sudo apt-get install -y nodejs nginx
+            
+            # Verify installations
+            node --version
+            npm --version
+            nginx -v
+            
+            # Go to app directory and install dependencies
+            cd ${{ secrets.EC2_PATH_P }}
+            npm install
+            
+            # Stop existing services if running
+            sudo systemctl stop nodeapp || true
+            sudo systemctl stop nginx || true
+            
+            # Create systemd service file for Node app
+            sudo tee /etc/systemd/system/nodeapp.service > /dev/null <<EOF
+            [Unit]
+            Description=Node.js App
+            After=network.target
+            
+            [Service]
+            Type=simple
+            ExecStart=/usr/bin/node ${{ secrets.EC2_PATH_P }}/src/index.js
+            Restart=always
+            RestartSec=10
+            User=${{ secrets.EC2_USER_P }}
+            Group=${{ secrets.EC2_USER_P }}
+            Environment=NODE_ENV=production
+            Environment=PORT=8000
+            WorkingDirectory=${{ secrets.EC2_PATH_P }}
+            StandardOutput=journal
+            StandardError=journal
+            
+            [Install]
+            WantedBy=multi-user.target
+            EOF
+            
+            # Reload systemd and start service
+            sudo systemctl daemon-reload
+            sudo systemctl enable nodeapp
+            sudo systemctl start nodeapp
+            
+            # Wait for the service to start
+            sleep 5
+            
+            # Check if service is running
+            sudo systemctl status nodeapp --no-pager
+            
+            # Configure production-grade Nginx
+            echo "🔧 Configuring production Nginx..."
+            
+            # Main nginx configuration optimizations
+            sudo tee /etc/nginx/nginx.conf > /dev/null <<EOF
+            user www-data;
+            worker_processes auto;
+            pid /run/nginx.pid;
+            include /etc/nginx/modules-enabled/*.conf;
+            
+            events {
+                worker_connections 2048;
+                use epoll;
+                multi_accept on;
+            }
+            
+            http {
+                # Basic Settings
+                sendfile on;
+                tcp_nopush on;
+                tcp_nodelay on;
+                keepalive_timeout 65;
+                types_hash_max_size 2048;
+                client_max_body_size 50M;
+                server_tokens off;
+                
+                # MIME
+                include /etc/nginx/mime.types;
+                default_type application/octet-stream;
+                
+                # Logging
+                log_format main '\$remote_addr - \$remote_user [\$time_local] "\$request" '
+                                '\$status \$body_bytes_sent "\$http_referer" '
+                                '"\$http_user_agent" "\$http_x_forwarded_for" '
+                                'rt=\$request_time uct=\$upstream_connect_time '
+                                'uht=\$upstream_header_time urt=\$upstream_response_time';
+                                
+                access_log /var/log/nginx/access.log main;
+                error_log /var/log/nginx/error.log warn;
+                
+                # Gzip Settings
+                gzip on;
+                gzip_vary on;
+                gzip_proxied any;
+                gzip_comp_level 6;
+                gzip_types
+                    text/plain
+                    text/css
+                    text/xml
+                    text/javascript
+                    application/json
+                    application/javascript
+                    application/xml+rss
+                    application/atom+xml
+                    image/svg+xml;
+                
+                # Rate limiting
+                limit_req_zone \$binary_remote_addr zone=api:10m rate=10r/s;
+                limit_req_zone \$binary_remote_addr zone=general:10m rate=1r/s;
+                
+                # SSL Configuration (ready for HTTPS)
+                ssl_protocols TLSv1.2 TLSv1.3;
+                ssl_ciphers ECDHE-RSA-AES256-GCM-SHA512:DHE-RSA-AES256-GCM-SHA512:ECDHE-RSA-AES256-GCM-SHA384:DHE-RSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-SHA384;
+                ssl_prefer_server_ciphers off;
+                ssl_session_cache shared:SSL:10m;
+                ssl_session_timeout 10m;
+                
+                # Include sites
+                include /etc/nginx/conf.d/*.conf;
+                include /etc/nginx/sites-enabled/*;
+            }
+            EOF
+            
+            # Remove default site
+            sudo rm -f /etc/nginx/sites-enabled/default
+            
+            # Create production app configuration
+            sudo tee /etc/nginx/sites-available/${APP_NAME} > /dev/null <<EOF
+            # Upstream configuration
+            upstream ${APP_NAME}_backend {
+                server 127.0.0.1:8000 max_fails=3 fail_timeout=30s;
+                keepalive 32;
+            }
+            
+            # Rate limiting maps
+            map \$request_uri \$limit_key {
+                ~*/api/  \$binary_remote_addr;
+                default "";
+            }
+            
+            server {
+                listen 80;
+                server_name ${{ secrets.EC2_HOST_P }} _;
+                
+                # Security headers
+                add_header X-Frame-Options "SAMEORIGIN" always;
+                add_header X-XSS-Protection "1; mode=block" always;
+                add_header X-Content-Type-Options "nosniff" always;
+                add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+                add_header Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline';" always;
+                
+                # Logging
+                access_log /var/log/nginx/${APP_NAME}_access.log main;
+                error_log /var/log/nginx/${APP_NAME}_error.log warn;
+                
+                # Rate limiting
+                limit_req zone=api burst=20 nodelay;
+                limit_req zone=general burst=5 nodelay;
+                
+                # Static files caching
+                location ~* \.(js|css|png|jpg|jpeg|gif|ico|svg|woff|woff2|ttf|eot)\$ {
+                    expires 1y;
+                    add_header Cache-Control "public, immutable";
+                    add_header X-Cache-Status "STATIC";
+                }
+                
+                # API routes
+                location /api/ {
+                    proxy_pass http://${APP_NAME}_backend;
+                    proxy_http_version 1.1;
+                    proxy_set_header Upgrade \$http_upgrade;
+                    proxy_set_header Connection 'upgrade';
+                    proxy_set_header Host \$host;
+                    proxy_set_header X-Real-IP \$remote_addr;
+                    proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+                    proxy_set_header X-Forwarded-Proto \$scheme;
+                    proxy_cache_bypass \$http_upgrade;
+                    
+                    # Timeouts
+                    proxy_connect_timeout 5s;
+                    proxy_send_timeout 60s;
+                    proxy_read_timeout 60s;
+                    
+                    # Buffer settings
+                    proxy_buffering on;
+                    proxy_buffer_size 4k;
+                    proxy_buffers 8 4k;
+                }
+                
+                # Main application
+                location / {
+                    proxy_pass http://${APP_NAME}_backend;
+                    proxy_http_version 1.1;
+                    proxy_set_header Upgrade \$http_upgrade;
+                    proxy_set_header Connection 'upgrade';
+                    proxy_set_header Host \$host;
+                    proxy_set_header X-Real-IP \$remote_addr;
+                    proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+                    proxy_set_header X-Forwarded-Proto \$scheme;
+                    proxy_cache_bypass \$http_upgrade;
+                    
+                    # Timeouts
+                    proxy_connect_timeout 5s;
+                    proxy_send_timeout 60s;
+                    proxy_read_timeout 60s;
+                }
+                
+                # Health check
+                location /health {
+                    access_log off;
+                    proxy_pass http://${APP_NAME}_backend/health;
+                    proxy_connect_timeout 2s;
+                    proxy_read_timeout 2s;
+                }
+                
+                # Nginx status (for monitoring)
+                location /nginx_status {
+                    stub_status on;
+                    access_log off;
+                    allow 127.0.0.1;
+                    deny all;
+                }
+                
+                # Block common attack patterns
+                location ~* \.(php|asp|aspx|jsp)\$ {
+                    deny all;
+                    return 404;
+                }
+                
+                # Block hidden files
+                location ~ /\. {
+                    deny all;
+                    return 404;
+                }
+            }
+            EOF
+            
+            # Enable site and test configuration
+            sudo ln -sf /etc/nginx/sites-available/${APP_NAME} /etc/nginx/sites-enabled/
+            sudo nginx -t
+            
+            if [ $? -eq 0 ]; then
+                echo "✅ Nginx configuration valid"
+                sudo systemctl enable nginx
+                sudo systemctl restart nginx
+                
+                # Verify nginx is running
+                if systemctl is-active --quiet nginx; then
+                    echo "✅ Nginx started successfully"
+                else
+                    echo "❌ Failed to start Nginx"
+                    sudo journalctl -u nginx --no-pager -n 20
+                    exit 1
+                fi
+            else
+                echo "❌ Nginx configuration test failed"
+                exit 1
+            fi
+            
+            # Configure firewall (if UFW is available)
+            if command -v ufw >/dev/null 2>&1; then
+                echo "🛡️  Configuring firewall..."
+                sudo ufw --force enable
+                sudo ufw allow 22/tcp
+                sudo ufw allow 80/tcp
+                sudo ufw allow 443/tcp
+            fi
+            
+            # Setup monitoring and alerting
+            echo "📊 Setting up monitoring..."
+            
+            # Create monitoring script
+            sudo tee /usr/local/bin/app_monitor.sh > /dev/null <<EOF
+            #!/bin/bash
+            APP_NAME="${APP_NAME}"
+            
+            # Check if app is running
+            if ! systemctl is-active --quiet \$APP_NAME; then
+                echo "\$(date): \$APP_NAME service is down, attempting restart" >> /var/log/\$APP_NAME-monitor.log
+                systemctl start \$APP_NAME
+                sleep 10
+                if ! systemctl is-active --quiet \$APP_NAME; then
+                    echo "\$(date): Failed to restart \$APP_NAME" >> /var/log/\$APP_NAME-monitor.log
+                fi
+            fi
+            
+            # Check if nginx is running
+            if ! systemctl is-active --quiet nginx; then
+                echo "\$(date): nginx service is down, attempting restart" >> /var/log/nginx-monitor.log
+                systemctl start nginx
+            fi
+            EOF
+            
+            sudo chmod +x /usr/local/bin/app_monitor.sh
+            
+            # Add monitoring cron job
+            (crontab -l 2>/dev/null; echo "*/5 * * * * /usr/local/bin/app_monitor.sh") | crontab -
+            
+            # Cleanup old releases (keep last 5)
+            echo "🧹 Cleaning up old releases..."
+            cd "$DEPLOY_PATH/releases"
+            ls -1t | tail -n +6 | xargs rm -rf 2>/dev/null || true
+            
+            # Final health checks
+            echo "🏥 Running final health checks..."
+            
+            if health_check 8000; then
+                echo "✅ Application health check passed"
+            else
+                echo "❌ Application health check failed"
+                exit 1
+            fi
+            
+            # Check if nginx is properly proxying
+            if curl -f -s http://localhost/ > /dev/null 2>&1; then
+                echo "✅ Nginx proxy check passed"
+            else
+                echo "❌ Nginx proxy check failed"
+                exit 1
+            fi
+            
+            # Display final status
+            echo "🎉 Production deployment completed successfully!"
+            echo "📊 Service Status:"
+            sudo systemctl status ${APP_NAME} --no-pager -l
+            echo ""
+            echo "🌐 Nginx Status:"
+            sudo systemctl status nginx --no-pager -l
+            echo ""
+            echo "🔗 Application URL: http://${{ secrets.EC2_HOST_P }}/"
+            echo "📋 API Documentation: http://${{ secrets.EC2_HOST_P }}/api-docs/"
+            echo "💓 Health Check: http://${{ secrets.EC2_HOST_P }}/health"
+            echo ""
+            echo "📝 Logs:"
+            echo "  App logs: $SHARED_PATH/logs/"
+            echo "  Nginx logs: /var/log/nginx/"
+            echo "  System logs: journalctl -u ${APP_NAME}"
