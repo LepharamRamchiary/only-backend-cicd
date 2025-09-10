@@ -17,17 +17,17 @@ jobs:
       - name: Deploy project files to EC2
         uses: easingthemes/ssh-deploy@main
         env:
-          SSH_PRIVATE_KEY: ${{ secrets.EC2_SSH_KEY }}
-          REMOTE_HOST: ${{ secrets.EC2_HOST }}
-          REMOTE_USER: ${{ secrets.EC2_USER }}
-          TARGET: ${{ secrets.EC2_PATH }}
+          SSH_PRIVATE_KEY: ${{ secrets.EC2_SSH_KEY_P }}
+          REMOTE_HOST: ${{ secrets.EC2_HOST_P }}
+          REMOTE_USER: ${{ secrets.EC2_USER_P }}
+          TARGET: ${{ secrets.EC2_PATH_P}}
 
       - name: Executing remote ssh commands
         uses: appleboy/ssh-action@master
         with:
-          host: ${{ secrets.EC2_HOST }}
-          username: ${{ secrets.EC2_USER }}
-          key: ${{ secrets.EC2_SSH_KEY }}
+          host: ${{ secrets.EC2_HOST_P }}
+          username: ${{ secrets.EC2_USER_P }}
+          key: ${{ secrets.EC2_SSH_KEY_P }}
           script: |
             # Update package list
             sudo apt-get update -y
@@ -42,7 +42,7 @@ jobs:
             nginx -v
             
             # Go to app directory and install dependencies
-            cd ${{ secrets.EC2_PATH }}
+            cd ${{ secrets.EC2_PATH_P }}
             npm install
             
             # Stop existing services if running
@@ -57,14 +57,14 @@ jobs:
             
             [Service]
             Type=simple
-            ExecStart=/usr/bin/node ${{ secrets.EC2_PATH }}/src/index.js
+            ExecStart=/usr/bin/node ${{ secrets.EC2_PATH_P }}/src/index.js
             Restart=always
             RestartSec=10
-            User=${{ secrets.EC2_USER }}
-            Group=${{ secrets.EC2_USER }}
+            User=${{ secrets.EC2_USER_P }}
+            Group=${{ secrets.EC2_USER_P }}
             Environment=NODE_ENV=production
             Environment=PORT=8000
-            WorkingDirectory=${{ secrets.EC2_PATH }}
+            WorkingDirectory=${{ secrets.EC2_PATH_P }}
             StandardOutput=journal
             StandardError=journal
             
@@ -175,7 +175,7 @@ jobs:
             
             server {
                 listen 80;
-                server_name ${{ secrets.EC2_HOST }} _;
+                server_name ${{ secrets.EC2_HOST_P }} _;
                 
                 # Security headers
                 add_header X-Frame-Options "SAMEORIGIN" always;
@@ -362,9 +362,9 @@ jobs:
             echo "🌐 Nginx Status:"
             sudo systemctl status nginx --no-pager -l
             echo ""
-            echo "🔗 Application URL: http://${{ secrets.EC2_HOST }}/"
-            echo "📋 API Documentation: http://${{ secrets.EC2_HOST }}/api-docs/"
-            echo "💓 Health Check: http://${{ secrets.EC2_HOST }}/health"
+            echo "🔗 Application URL: http://${{ secrets.EC2_HOST_P }}/"
+            echo "📋 API Documentation: http://${{ secrets.EC2_HOST_P }}/api-docs/"
+            echo "💓 Health Check: http://${{ secrets.EC2_HOST_P }}/health"
             echo ""
             echo "📝 Logs:"
             echo "  App logs: $SHARED_PATH/logs/"
